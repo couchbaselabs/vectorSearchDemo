@@ -6,3 +6,5 @@ sentence-transformers
 torch
 tqdm
 Flask>=3.0
+couchbase-agent-memory
+numpy

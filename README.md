@@ -64,10 +64,37 @@ Example use cases:
 
 # Step 0: Prerequisites
 
-Make sure you've got Python running. You'll probably want to create a virtual environment first, like this:
+## Install Python
+
+This demo requires **Python 3.12 or newer**. Check what you have with `python3 --version` (macOS/Linux) or `python --version` (Windows).
+
+If you need to install or upgrade Python, use your platform's package manager:
+
+**macOS (Homebrew):**
 
 ```bash
-# Linux
+# Install Homebrew first if you don't have it: https://brew.sh
+brew install python@3.12
+# brew installs it as `python3.12`; confirm:
+python3.12 --version
+```
+
+**Windows (winget):**
+
+```powershell
+winget install Python.Python.3.12
+# Open a new terminal, then confirm:
+python --version
+```
+
+On Linux, use your distro's package manager (e.g. `sudo apt install python3.12 python3.12-venv` on Debian/Ubuntu).
+
+## Create a virtual environment
+
+Once Python is installed, create a virtual environment (use the `python3.12` binary if `python3` points at an older version):
+
+```bash
+# Linux/macOS
 python3 -m venv venv
 
 # Windows
@@ -93,9 +120,207 @@ Then install requirements:
 python -m pip install -r requirements.txt
 ```
 
-At this point, you may want to go ahead and create an `.env` file, using the settings you need for your environment. Check out `.env.sample` for an example.
+You'll need an `.env` file holding your Couchbase connection string, credentials, and (for the RAG scripts) an OpenAI key. You have three ways to create/edit it — pick whichever you prefer; they all read and write the same `.env`. See **Configuring the demo** below for details. You'll get the actual connection string and credentials from the Capella cluster you set up in **Step 0.5**.
 
-Now you're ready to start loading data.
+Now you're ready to set up your Couchbase Capella cluster.
+
+# Step 0.5: Set up Couchbase Capella
+
+Before you can load any data, you need a Couchbase Capella cluster with a bucket, the collections this demo uses, a database user, and network access configured. If you don't have a cluster yet, create a free tier one from the [Capella UI](https://cloud.couchbase.com/) first.
+
+## 1. Create a bucket
+
+In the Capella UI, open your cluster and go to **Data Tools → Buckets** (or **Settings → Buckets**), then **Create Bucket**:
+
+- **Name:** `vectorSearchDemo` (this is what the demo commands use; use another name if you prefer, but pass it consistently via `--bucket`).
+- Leave the memory quota at the default for the free tier.
+
+> Bucket creation isn't available through SQL++/N1QL — it must be done in the Capella UI (or the Management API).
+
+## 2. Create the collections
+
+Every new bucket has a `_default` scope, but this demo stores each dataset in its own **collection** under that scope, and those collections do **not** exist by default. Create them.
+
+Easiest path — open the **Query Workbench** (Data Tools → Query) and run:
+
+```sql
+CREATE COLLECTION `vectorSearchDemo`.`_default`.`movies` IF NOT EXISTS;
+CREATE COLLECTION `vectorSearchDemo`.`_default`.`emails` IF NOT EXISTS;
+CREATE COLLECTION `vectorSearchDemo`.`_default`.`yelp`   IF NOT EXISTS;
+```
+
+(You can also create them via **Data Tools → Collections** in the UI.) If you plan to use the OpenAI (1536-dim) provider, also create the parallel `movies_openai` / `emails_openai` / `yelp_openai` collections.
+
+To run ad-hoc `SELECT`s for troubleshooting (the vector indexes don't serve plain selects), also add a primary index per collection:
+
+```sql
+CREATE PRIMARY INDEX ON `vectorSearchDemo`.`_default`.`movies`;
+CREATE PRIMARY INDEX ON `vectorSearchDemo`.`_default`.`emails`;
+CREATE PRIMARY INDEX ON `vectorSearchDemo`.`_default`.`yelp`;
+```
+
+## 3. Create a database user with a custom role
+
+The demo scripts connect with a Couchbase **database user** (this is separate from your Capella login). Go to **Settings → Cluster Access → Create Database Credentials** and create one:
+
+- **Username / password:** choose your own; these go into `.env` as `COUCHBASE_USERNAME` / `COUCHBASE_PASSWORD`.
+- **Roles:** grant a custom role scoped to the demo bucket with **all grants** — the simplest reliable option is to give the credential **read and write access to all buckets** (or at minimum to `vectorSearchDemo`), covering Data, Query, and Search. The loader writes documents, the RAG scripts query the Data/Query/Search services, and index creation needs the management grants, so the credential needs the full set of data + query + search privileges on the bucket.
+
+> If you scope the role too narrowly (e.g. read-only, or Data but not Query/Search), you'll see authentication or "permission denied" errors when loading or querying. When in doubt for a demo, grant full access to `vectorSearchDemo`.
+
+## 4. Allow network access
+
+Capella blocks all inbound connections by default. Go to **Settings → Networking → Allowed IP Addresses → Add Allowed IP** and either:
+
+- Add your current IP, or
+- **Allow access from anywhere** by adding `0.0.0.0/0`.
+
+> `0.0.0.0/0` opens the cluster to the entire internet. That's fine for a short-lived, throwaway demo cluster, but don't leave it on a cluster with real data — restrict it to known IPs and remove the rule when the demo is over.
+
+## 5. Get the connection string
+
+Go to the **Connect** tab in the Capella UI (**cluster → Connect**). Copy the **Public Connection String** shown there — it looks like `couchbases://cb.xxxxxxxx.cloud.couchbase.com`.
+
+Put it, along with the database user from step 3, into your `.env`:
+
+```bash
+COUCHBASE_CONNSTR=couchbases://cb.xxxxxxxx.cloud.couchbase.com
+COUCHBASE_USERNAME=your-db-user
+COUCHBASE_PASSWORD=your-db-password
+```
+
+Now you're ready to configure the demo and start loading data.
+
+# Configuring the demo
+
+All configuration lives in a single `.env` file (Couchbase connection + credentials, embedding provider/model, OpenAI key). There are three ways to create and edit it — they all read and write the same `.env`, so you can mix and match:
+
+## Option A — Setup wizard (terminal, no manual editing)
+
+Run the interactive wizard and answer the prompts:
+
+```bash
+python setup.py
+```
+
+It shows your current values as defaults (so re-running only changes what you type), writes `.env` for you, and offers to run the connectivity test at the end. This is the easiest option if you'd rather not touch `.env` by hand.
+
+## Option B — Web UI configuration drawer
+
+Start the web UI (`python app.py`) and click **⚙ Configuration** in the top-right. The drawer lets you enter the connection string, credentials, embedding provider/model, and OpenAI key, then:
+
+- **Test connection** runs the same readiness checks below against the values in the form (before saving).
+- **Save to .env** writes them to `.env`.
+
+Existing secrets (password, API key) are shown masked; leave them as-is to keep the stored value. Saving normalizes `.env` formatting (consistent key order; inline comments are dropped), but never changes values you didn't edit.
+
+## Option C — Edit `.env` by hand
+
+Copy the sample and edit it in your editor of choice:
+
+```bash
+cp .env.sample .env      # Linux/macOS
+copy .env.sample .env    # Windows
+```
+
+`.env.sample` documents every setting (connection, provider/model, the 384/1536 dimension matrix, optional `HF_TOKEN`).
+
+## Test connectivity before loading
+
+However you configured it, verify everything is reachable **before** loading data — cluster connection, bucket + collections, the embedding provider's dimension, and the OpenAI key:
+
+```bash
+python setup.py    # answer "y" at the connectivity-test prompt, or just re-run and keep existing values
+```
+
+or click **Test connection** in the web UI drawer. A passing run looks like:
+
+```
+✓ Couchbase connection: reachable at couchbases://cb.xxxx.cloud.couchbase.com
+✓ Bucket: 'vectorSearchDemo' found
+✓ Collections: found under _default: ['movies', 'emails', 'yelp']
+✓ Embedding provider: provider 'local' model 'all-MiniLM-L6-v2' → 384-dim (matches expected 384)
+✓ OpenAI (for RAG): key valid; chat model 'gpt-4o-mini'
+```
+
+A failed check tells you exactly what to fix (unreachable cluster → check the connection string / allowed IPs from Step 0.5; missing collections → create them; dimension mismatch → provider/model doesn't match the index).
+
+> The web UI writes secrets to `.env` on Save and executes commands locally with no authentication — only run it on `localhost` for a trusted, local demo.
+
+# (Optional) Set up Agent Memory — AI Data Plane
+
+> This is only needed for the **AI Data Plane** features of the demo (agent memory on top of RAG). You can skip it and run the plain RAG demo without it. A Capella-hosted Agent Memory endpoint is coming; until then you run the server locally alongside `app.py`.
+
+This repo ships a lightweight, **native** Agent Memory server (`memory_server.py`) — no Docker. It runs next to `app.py`, stores its data in your Couchbase cluster, and is driven by the real `couchbase-agent-memory` SDK (`AgentMemoryClient`). The app talks to it over HTTP (`AGENT_MEMORY_BASE_URL`, default `http://localhost:8090` — 8090 because the web UI uses 8080).
+
+> The native server implements the SDK's user/session/memory API and recalls memories by vector similarity on OpenAI embeddings. It intentionally does **not** replicate the official server's background LLM "fact extraction" — it stores conversation turns and recalls the most relevant ones. When the Couchbase-hosted Agent Memory endpoint is available, just point `AGENT_MEMORY_BASE_URL` at it — the same SDK calls work unchanged. An optional path for running the official container instead is at the end of this section.
+
+## 1. Create its scope and collections in the cluster
+
+The server uses a fixed scope `agentmemory` with three collections. Create them in your bucket (Query Workbench):
+
+```sql
+CREATE SCOPE `vectorSearchDemo`.`agentmemory` IF NOT EXISTS;
+CREATE COLLECTION `vectorSearchDemo`.`agentmemory`.`users`    IF NOT EXISTS;
+CREATE COLLECTION `vectorSearchDemo`.`agentmemory`.`sessions` IF NOT EXISTS;
+CREATE COLLECTION `vectorSearchDemo`.`agentmemory`.`memory`   IF NOT EXISTS;
+```
+
+## 2. Run the native server
+
+It reads `AGENTMEMORY_*` from `.env` and falls back to your `COUCHBASE_*` / `OPENAI_API_KEY`, so if your `.env` is already configured there's nothing extra to set:
+
+```bash
+python memory_server.py          # serves http://localhost:8090
+```
+
+## 3. Verify it's healthy
+
+```bash
+curl -s http://localhost:8090/health
+```
+
+or from Python (the real SDK):
+
+```python
+from agentmemory import AgentMemoryClient   # pip install couchbase-agent-memory
+with AgentMemoryClient(base_url="http://localhost:8090") as client:
+    print(client.health_ping().overall_status.value)   # -> healthy
+```
+
+The app picks it up via `AGENT_MEMORY_BASE_URL` in `.env` (default `http://localhost:8090` already matches).
+
+## (Optional) Use the official Agent Memory container instead
+
+If you have access to the official `agentmemory-server` image (obtained via your Couchbase download portal — it's a gated artifact, `docker load`ed from a tarball, not a public pull) and want the full server with background fact-extraction, run it instead of `memory_server.py`. It also reads the `AGENTMEMORY_*` variables and listens on 8080 internally:
+
+```bash
+docker run -d --name agentmemory-server --env-file .env \
+  -p 8090:8080 -p 9090:9090 \
+  -v "$(pwd)/ca.pem:/app/certs/ca.pem:ro" \
+  --restart unless-stopped agentmemory-server:arm64   # or :amd64
+```
+
+Either way, point `AGENT_MEMORY_BASE_URL` at `http://localhost:8090`.
+
+## Using agent memory with RAG
+
+Turn it on with the global toggle (web UI, AI Services tab) or `AI_DATAPLANE_ENABLED=true` in `.env`. When enabled, each RAG query first recalls relevant prior turns and, after answering, remembers the new Q&A. You'll see this in the output:
+
+- **Related question** → recalled memories are prepended to the RAG context, each labeled with a relevance score (0–1) and a strong/low-relevance tag so the model discounts weakly-related ones; the full RAG query still runs.
+- **Repeat / near-duplicate question** → answered directly from memory, **skipping the vector search + LLM** — e.g. `⚡ Served from memory in 1.1s — skipped the vector search + LLM call`. (In the web UI this shows as a **⚡ from memory** badge next to Run.)
+- Every full run also prints a timing/token breakdown (`memory recall / embed / vector query / LLM / total`).
+
+### Sessions are scoped per workflow
+
+A **session** groups a conversation so memories are recalled within it. The session updates as part of the workflow you choose: each workflow (Hyperscale / Composite / Hybrid) uses its own session (`<base>-hyperscale`, `<base>-composite`, `<base>-hybrid`), so memories from a movies chat aren't recalled during a Yelp chat. In the web UI the active session is shown on the AI Services tab and updates when you switch RAG tabs; **New session** starts a fresh base for all workflows. On the CLI, pass `--session <id>` (default `default`).
+
+### Tuning recall
+
+- **`--memory-min-score <0-1>`** (UI: *Memory recall threshold*): minimum cosine for a memory to be recalled at all. Higher = stricter; repeats and closely-related questions still match. Default comes from the server (`AGENTMEMORY_MIN_SCORE`, 0.2).
+- **`--memory-hit-threshold <0-1>`**: cosine at/above which a memory is treated as the *same* question and answered from memory (short-circuit). Default ~0.9.
+- **`AGENTMEMORY_STRONG_SCORE`** (default 0.7): at/above this a recalled memory is labeled "relevant"; below it is shown but flagged "low relevance" so the model discounts it.
+- Failed answers ("the context doesn't contain that") are **not** cached, so a later repeat re-runs RAG instead of replaying a non-answer.
 
 # Step 1: Loading the data
 

@@ -10,7 +10,55 @@
 
 <body>
 <div class="container">
-    <h1>Couchbase Vector Search Demo</h1>
+    <div class="topbar">
+        <h1>Couchbase Vector Search Demo</h1>
+        <button class="config-toggle" onclick="openConfig()">⚙ Configuration</button>
+    </div>
+
+    <!-- Configuration drawer: edit .env values and test connectivity without leaving the browser.
+         Localhost demo only — writes secrets to .env on Save. -->
+    <div id="configOverlay" class="drawer-overlay" onclick="closeConfig()"></div>
+    <aside id="configDrawer" class="drawer" aria-hidden="true">
+        <div class="drawer-header">
+            <h2>Configuration</h2>
+            <button class="drawer-close" onclick="closeConfig()" aria-label="Close">×</button>
+        </div>
+        <p class="drawer-note">These values are saved to <code>.env</code>. You can also edit
+            <code>.env</code> by hand or run <code>python setup.py</code> in a terminal.</p>
+
+        <fieldset>
+            <legend>Couchbase (from the Capella Connect tab)</legend>
+            <label>Connection string
+                <input type="text" id="cfgConnstr" placeholder="couchbases://cb.xxxx.cloud.couchbase.com" /></label>
+            <label>Username <input type="text" id="cfgUsername" /></label>
+            <label>Password <input type="password" id="cfgPassword" placeholder="••••••••" /></label>
+            <label>Bucket <input type="text" id="cfgBucket" placeholder="vectorSearchDemo" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Embedding</legend>
+            <label>Provider
+                <select id="cfgProvider">
+                    <option value="local">Local — sentence-transformers</option>
+                    <option value="openai">OpenAI</option>
+                </select></label>
+            <label>Model <input type="text" id="cfgModel" placeholder="all-MiniLM-L6-v2" /></label>
+            <label>Dimensions <input type="text" id="cfgDimensions" placeholder="384" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>OpenAI (required for RAG generation)</legend>
+            <label>API key <input type="password" id="cfgOpenaiKey" placeholder="sk-•••••••" /></label>
+            <label>Chat model <input type="text" id="cfgOpenaiChat" placeholder="gpt-4o-mini" /></label>
+        </fieldset>
+
+        <div class="drawer-actions">
+            <button class="btn-test" onclick="testConnection()">Test connection</button>
+            <button class="btn-save" onclick="saveConfig()">Save to .env</button>
+        </div>
+        <div id="configStatus" class="config-status"></div>
+        <ul id="preflightResults" class="preflight-results"></ul>
+    </aside>
 
     <!-- Global embedding controls: the provider + optional model name drive EVERY load and RAG
          command below. Each dataset maps to its local collection, or its <name>_openai (1536-dim)
@@ -61,10 +109,41 @@
             </section>
 
             <section id="content7">
-                Instead of loading and vectorizing data yourself, you can use AI Services to vectorize data
+                <div class="dataplane-controls">
+                    <label class="dp-switch">
+                        <input type="checkbox" id="dpToggle" onchange="toggleDataplane()" />
+                        <span>Use AI Data Plane for RAG chats</span>
+                    </label>
+                    <button type="button" onclick="refreshDataplane()">Refresh status</button>
+                    <span id="dpToggleMsg" class="dp-msg"></span>
+                </div>
+                <div class="dataplane-controls">
+                    <span class="dp-msg">Conversation session: <code id="dpSession">default</code></span>
+                    <button type="button" onclick="newSession()">New session</button>
+                    <span class="dp-msg">(starts a fresh conversation so prior memories aren't recalled)</span>
+                </div>
+                <div class="dataplane-controls">
+                    <label class="dp-msg" for="dpMinScore">Memory recall threshold (0–1):</label>
+                    <input type="number" id="dpMinScore" min="0" max="1" step="0.05" value="0.2" style="width:5rem" />
+                    <span class="dp-msg">higher = stricter; blank = server default. Repeats &amp; closely-related questions still match.</span>
+                </div>
+
+                <!-- Diagram with a live status overlay: each AI Data Plane capability shows
+                     active / used / usage counts / tokens served from memory. -->
+                <div class="diagram-wrap">
+                    <img class="tab-image" src="/static/aiServicesScreenShot.png" alt="AI Services Vectorization" />
+                    <div id="dpOverlay" class="dp-overlay">
+                        <div class="dp-pill" data-cap="agent_memory">
+                            <span class="dp-dot" id="am-dot"></span>
+                            <span class="dp-name">Agent Memory</span>
+                            <span class="dp-stat" id="am-stat">checking…</span>
+                        </div>
+                    </div>
+                </div>
+
+                <p>Instead of loading and vectorizing data yourself, you can use AI Services to vectorize data
                 and store data during loading and updating, automatically, using a private hosted model or external model.
-                See the <a href="https://docs.couchbase.com/ai/build/vectorization-service/vectorize-structured-data-capella.html" target="_blank">AI Services documentation</a> for more details.
-                <img class="tab-image" src="/static/aiServicesScreenShot.png" alt="AI Services Vectorization" />
+                See the <a href="https://docs.couchbase.com/ai/build/vectorization-service/vectorize-structured-data-capella.html" target="_blank">AI Services documentation</a> for more details.</p>
             </section>
         </div>
     </div>
@@ -117,6 +196,7 @@
 
     <button class="run" onclick="runRag()">Run</button>
     <span id="preflightRag" class="preflight-badge"></span>
+    <span id="memoryBadge" class="preflight-badge"></span>
 
 
     <textarea id="outputQuery" readonly></textarea>

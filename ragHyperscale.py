@@ -14,6 +14,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import List
 
@@ -27,6 +28,7 @@ from openai import OpenAI
 load_dotenv()
 
 import config
+import dataplane
 
 # Only force HF fully offline when no HF_TOKEN is provided. With a token, allow authenticated
 # online access (higher rate limits, #6); without one, offline avoids the per-run cache
@@ -280,6 +282,26 @@ def parse_args():
         help="IVF probe count for APPROX_VECTOR_DISTANCE (recall vs latency). Higher = more index "
              "cells scanned = better recall, slower. Needs enough loaded data to show a difference.",
     )
+    parser.add_argument(
+        "--session",
+        default="default",
+        help="Agent-memory session id — groups a conversation. Only used when the AI Data Plane "
+             "is enabled (AI_DATAPLANE_ENABLED); recalls prior turns and remembers this one.",
+    )
+    parser.add_argument(
+        "--memory-min-score",
+        type=float,
+        default=None,
+        help="Minimum cosine relevance (0-1) for recalling a memory. Higher = stricter; repeats and "
+             "closely-related questions still match. Omit to use the memory server's default.",
+    )
+    parser.add_argument(
+        "--memory-hit-threshold",
+        type=float,
+        default=None,
+        help="Cosine at/above which a recalled memory is treated as the SAME question and answered "
+             "from memory, skipping the vector search + LLM (default ~0.9).",
+    )
 
     return parser.parse_args()
 
@@ -319,30 +341,55 @@ def main():
     cfg = load_config_from_args(args)
     cluster = get_cluster()
 
+    timings = {}
+
+    # Memory-first: a near-duplicate question is answered from memory, skipping vector search + LLM.
+    mem = dataplane.memory_phase(CFG, args.session, prompt,
+                                 min_score=args.memory_min_score,
+                                 hit_threshold=args.memory_hit_threshold)
+    if mem["enabled"]:
+        timings["memory recall"] = mem["recall_seconds"]
+        LOG.info("AI Data Plane: recalled %d block(s), top score %.2f (session '%s')",
+                 len(mem["blocks"]), mem["top_score"], args.session)
+
+    if mem["hit"]:
+        print("\n=== Answer (from memory) ===\n")
+        print(mem["hit_answer"])
+        print(f"\n⚡ Served from memory in {mem['recall_seconds']:.2f}s (top score {mem['top_score']:.2f}) — "
+              f"skipped the vector search + LLM call (~{dataplane.est_tokens(mem['hit_answer'])} tokens of LLM output avoided).")
+        return
+
     LOG.info("Computing embedding")
+    t = time.time()
     embedding = compute_embedding(prompt)
+    timings["embed"] = time.time() - t
     preflight_dimensions(len(embedding), cfg.collection)
 
     LOG.info("Running hyperscale vector query")
-    chunks = run_hyperscale_query(
-        cluster=cluster,
-        cfg=cfg,
-        query_embedding=embedding
-    )
+    t = time.time()
+    chunks = run_hyperscale_query(cluster=cluster, cfg=cfg, query_embedding=embedding)
+    timings["vector query"] = time.time() - t
 
     if not chunks:
         print("\nNo matching context found.")
         return
 
     context = "\n\n---\n\n".join(chunks)
+    if mem["context"]:
+        context = f"{mem['context']}\n\n--- Retrieved documents ---\n\n{context}"
 
     print("\n=== Context to Augment with ===\n")
     print(context)
 
+    t = time.time()
     answer = generate_with_llm(prompt, context)
+    timings["LLM"] = time.time() - t
 
     print("\n=== Answer ===\n")
     print(answer)
+
+    dataplane.print_timings(timings, extra=f"LLM input ~{dataplane.est_tokens(context + prompt)} tokens (est)")
+    dataplane.maybe_remember(CFG, args.session, prompt, answer)
 
 
 if __name__ == "__main__":

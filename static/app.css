@@ -198,3 +198,162 @@ button:hover {
 .preflight-badge.pass { display: inline-block; background: #dcfce7; color: #166534; border: 1px solid #86efac; }
 .preflight-badge.fail { display: inline-block; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .preflight-badge.skip { display: inline-block; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+/* ---------- Configuration drawer ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.config-toggle {
+  flex: none;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.config-toggle:hover { background: #e0e7ff; }
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 40;
+}
+.drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 92vw);
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.18);
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  z-index: 50;
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.drawer-close {
+  border: none;
+  background: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #64748b;
+}
+.drawer-note { font-size: 0.85rem; color: #475569; margin: 0.25rem 0 1rem; }
+.drawer-note code { background: #f1f5f9; padding: 0 0.25rem; border-radius: 3px; }
+
+.drawer fieldset {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem 1rem;
+}
+.drawer legend { font-weight: 600; font-size: 0.85rem; color: #334155; padding: 0 0.4rem; }
+.drawer label {
+  display: block;
+  font-size: 0.8rem;
+  color: #475569;
+  margin-top: 0.6rem;
+}
+.drawer label input,
+.drawer label select {
+  display: block;
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.drawer-actions { display: flex; gap: 0.6rem; margin-top: 0.5rem; }
+.btn-test, .btn-save {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+}
+.btn-test { background: #f1f5f9; border-color: #cbd5e1; }
+.btn-save { background: #2563eb; color: #fff; }
+.btn-test:hover { background: #e2e8f0; }
+.btn-save:hover { background: #1d4ed8; }
+
+.config-status { margin-top: 0.8rem; font-size: 0.88rem; font-weight: 600; }
+.config-status.pass { color: #166534; }
+.config-status.fail { color: #991b1b; }
+
+.preflight-results { list-style: none; padding: 0; margin: 0.6rem 0 0; }
+.preflight-results li {
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 0.3rem;
+  word-break: break-word;
+}
+.preflight-results li.ok { background: #dcfce7; color: #166534; }
+.preflight-results li.bad { background: #fee2e2; color: #991b1b; }
+
+/* ---------- AI Data Plane: diagram overlay + toggle ---------- */
+.dataplane-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.dp-switch { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; cursor: pointer; }
+.dp-switch input { width: 1.1rem; height: 1.1rem; }
+.dp-msg { font-size: 0.85rem; color: #475569; }
+.dp-msg.on { color: #166534; }
+.dp-msg.fail { color: #991b1b; }
+
+.diagram-wrap { position: relative; display: inline-block; max-width: 100%; }
+.diagram-wrap .tab-image { display: block; max-width: 100%; height: auto; }
+
+.dp-overlay {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.dp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.dp-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: #cbd5e1; flex: none; }
+.dp-dot.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25); }
+.dp-dot.off { background: #ef4444; }
+.dp-name { font-weight: 600; }
+.dp-stat { color: #475569; }
+
+/* "full RAG" variant of the memory badge (blue) — the "⚡ from memory" state reuses .pass (green) */
+.preflight-badge.mem-full { display: inline-block; background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }
